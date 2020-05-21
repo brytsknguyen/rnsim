@@ -6,9 +6,21 @@
 #include "geometry_msgs/PoseStamped.h"
 #include "geometry_msgs/TwistStamped.h"
 #include <geometry_msgs/TransformStamped.h>
+#include <nav_msgs/Odometry.h>
+
 #include <uwb_driver/UwbRange.h>
 
 #include <tf/transform_broadcaster.h>
+
+#define KNRM  "\x1B[0m"
+#define KRED  "\x1B[31m"
+#define KGRN  "\x1B[32m"
+#define KYEL  "\x1B[33m"
+#define KBLU  "\x1B[34m"
+#define KMAG  "\x1B[35m"
+#define KCYN  "\x1B[36m"
+#define KWHT  "\x1B[37m"
+#define RESET "\033[0m"
 
 using namespace std;
 using namespace Eigen;
@@ -34,8 +46,12 @@ map<int, Matrix<double, 3, 1> > t_V_B;
 std::vector<std::vector<int>> slotmap;
 std::vector<double> slotmap_time;
 
-// Ground truth topic
+bool skip_old = true;
+
+// Ground truth topic name
 std::vector<std::string> ground_truth_topic;
+// Ground truth topic type
+std::vector<std::string> ground_truth_topic_type;
 
 std::vector<geometry_msgs::TransformStamped> nodes_info_msg;
 std::vector<bool> nodes_info_new;
@@ -58,14 +74,21 @@ vector<double> range_noise_gaussian;
 
 int find_node_idx(int node_id)
 {
-    auto node_id_it = std::find(std::begin(nodes_id), std::end(nodes_id), node_id);
-    if (node_id_it == std::end(nodes_id))
-        return -1;
-    else
-        return int(std::distance(nodes_id.begin(), node_id_it));
+    // auto node_id_it = std::find(std::begin(nodes_id), std::end(nodes_id), node_id);
+    // if (node_id_it == std::end(nodes_id))
+    //     return -1;
+    // else
+    //     return int(std::distance(nodes_id.begin(), node_id_it));
+
+    for(int i = 0; i < nodes_id.size(); i++)
+    {
+        if(nodes_id[i] == node_id)
+            return i;
+    }
+    return -1;
 }
 
-void ground_truth_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, int i)
+void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, int i)
 {
     // printf("Received update for node %d\n", nodes_id[i]);
     nodes_info_msg[i] = *msg;
@@ -89,6 +112,60 @@ void ground_truth_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, int i
 
 
     // Calculate the body frame pose
+    Vector3d p_W_V(nodes_info_msg[i].transform.translation.x,
+                   nodes_info_msg[i].transform.translation.y,
+                   nodes_info_msg[i].transform.translation.z);
+
+    Quaterniond q_W_V(nodes_info_msg[i].transform.rotation.w,
+                      nodes_info_msg[i].transform.rotation.x,
+                      nodes_info_msg[i].transform.rotation.y,
+                      nodes_info_msg[i].transform.rotation.z);
+
+    int node_id = nodes_id[i];
+
+    Quaterniond q_W_B     = q_W_V*Quaterniond(R_V_B[node_id]);
+    Vector3d    t_V_B_inW = q_W_V.toRotationMatrix()*t_V_B[node_id];
+
+    Vector3d p_W_B = p_W_V + t_V_B_inW;
+
+    ground_truth_viz_msg[i].pose.position.x = p_W_B.x();
+    ground_truth_viz_msg[i].pose.position.y = p_W_B.y();
+    ground_truth_viz_msg[i].pose.position.z = p_W_B.z();
+
+    ground_truth_viz_msg[i].pose.orientation.x = q_W_B.x();
+    ground_truth_viz_msg[i].pose.orientation.y = q_W_B.y();
+    ground_truth_viz_msg[i].pose.orientation.z = q_W_B.z();
+    ground_truth_viz_msg[i].pose.orientation.w = q_W_B.w();
+
+    ground_truth_body_pub[i].publish(ground_truth_viz_msg[i]);
+
+    nodes_pos[i*3]     = nodes_info_msg[i].transform.translation.x;
+    nodes_pos[i*3 + 1] = nodes_info_msg[i].transform.translation.y;
+    nodes_pos[i*3 + 2] = nodes_info_msg[i].transform.translation.z;
+
+    return;
+}
+
+void ground_truth_odom_cb(const nav_msgs::Odometry::ConstPtr& msg, int i)
+{
+    // printf("Received update for node %d\n", nodes_id[i]);
+    nodes_info_msg[i].header = msg->header;
+    // Copy data to the message
+    nodes_info_msg[i].transform.translation.x = msg->pose.pose.position.x;
+    nodes_info_msg[i].transform.translation.y = msg->pose.pose.position.y;
+    nodes_info_msg[i].transform.translation.z = msg->pose.pose.position.z;
+    nodes_info_msg[i].transform.rotation.x = msg->pose.pose.orientation.x;
+    nodes_info_msg[i].transform.rotation.y = msg->pose.pose.orientation.y;
+    nodes_info_msg[i].transform.rotation.z = msg->pose.pose.orientation.z;
+    nodes_info_msg[i].transform.rotation.w = msg->pose.pose.orientation.w;
+
+    nodes_info_new[i] = true;
+
+    // Store and publish the body frame pose
+    static std::vector<geometry_msgs::PoseStamped> ground_truth_viz_msg(nodes_id.size(),
+                                                                        geometry_msgs::PoseStamped());
+
+    // Calculate the body frame pose (no need to publish the posestamp data since the topic is already in posestamped format)
     Vector3d p_W_V(nodes_info_msg[i].transform.translation.x,
                    nodes_info_msg[i].transform.translation.y,
                    nodes_info_msg[i].transform.translation.z);
@@ -176,12 +253,10 @@ void timer_cb(const ros::TimerEvent&)
                                     (nodes_pos[rspd_idx*3 + 1] != 9999) &&
                                     (nodes_pos[rspd_idx*3 + 2] != 9999);
 
-            bool node_pos_updated = rqst_pos_updated && rspd_pos_updated && nodes_info_new[rqst_idx];
+            bool node_pos_updated = rqst_pos_updated && rspd_pos_updated && (nodes_info_new[rqst_idx] || !skip_old) ;
 
             if(node_pos_updated)
             {
-                nodes_info_new[rqst_idx] = false;
-
                 Vector3d rqst_pos(nodes_pos[rqst_idx*3],
                                   nodes_pos[rqst_idx*3 + 1],
                                   nodes_pos[rqst_idx*3 + 2]);
@@ -271,29 +346,38 @@ void timer_cb(const ros::TimerEvent&)
 
                         range_pub[rqst_idx].publish(uwb_range_info_msg[rqst_idx]);
 
-                        printf("Range %d.%d -> %d.%d:\n"
+                        if(!nodes_info_new[rqst_idx])
+                            printf(KYEL);
+
+                        printf("Range %d.%d -> %d.%d. flags: %d, %d, %s, %d.\n"
                                "pi = (%.2f, %.2f, %.2f), "
                                "pai = (%.2f, %.2f, %.2f), "
                                "pj = (%.2f, %.2f, %.2f), "
                                "paj = (%.2f, %.2f, %.2f), "
                                "dij = %f, "
-                               "dij_sent = %f\n",
+                               "dij_sent = %f\n" RESET,
                                 rqst_idx, ant_rqst_idx,
                                 rspd_idx, ant_rspd_idx,
+                                rqst_pos_updated, rspd_pos_updated,
+                                nodes_info_new[rqst_idx] ? "true" : "false", rqst_idx,
                                 rqst_pos(0), rqst_pos(1), rqst_pos(2),
                                 rqst_ant_pos(0), rqst_ant_pos(1), rqst_ant_pos(2),
                                 rspd_pos(0), rspd_pos(1), rspd_pos(2),
                                 rspd_ant_pos(0), rspd_ant_pos(1), rspd_ant_pos(2),
                                 distance, uwb_range_info_msg[rqst_idx].distance);
                     }
+
+                    nodes_info_new[rqst_idx] = false;
                 }
             }
             else
             {
-                printf("Range %d.%d -> %d.%d:\n"
-                       "Node position not yet updated. Skipping.\n",
-                       rqst_idx, slotmap[slot_idx][j*4 + 2],
-                       rspd_idx, slotmap[slot_idx][j*4 + 3]);
+                printf(KYEL "Range %d.%d -> %d.%d. flags: %d, %d, %s, %d.\n"
+                            "Node position not yet updated. Skipping.",
+                            rqst_idx, slotmap[slot_idx][j*4 + 2],
+                            rspd_idx, slotmap[slot_idx][j*4 + 3],
+                            rqst_pos_updated, rspd_pos_updated,
+                            nodes_info_new[rqst_idx] ? "true" : "false", rqst_idx);
             }
         }
     }
@@ -362,6 +446,7 @@ int main(int argc, char **argv)
                 printf("%3.2f, %3.2f, %3.2f\n", nodes_pos[i*3], nodes_pos[i*3 + 1], nodes_pos[i*3 + 2]);
                 antennas_pos.push_back(std::vector<double>{});
                 ground_truth_topic.push_back(std::string(""));
+                ground_truth_topic_type.push_back(std::string(""));
                 ground_truth_sub.push_back(ros::Subscriber());
                 nodes_info_msg.push_back(geometry_msgs::TransformStamped());
                 nodes_info_new.push_back(false);
@@ -567,7 +652,8 @@ int main(int argc, char **argv)
             {
                 auto node_idx = std::distance(nodes_id.begin(), node_id_it);
                 ground_truth_topic[node_idx] = ground_truth_topic_[i+1];
-                i = i + 2;
+                ground_truth_topic_type[node_idx] = ground_truth_topic_[i+2];
+                i = i + 3;
             }
             else
             {
@@ -575,8 +661,8 @@ int main(int argc, char **argv)
                 i++;
             }
 
-            // Skip if there is fewer than two values in the array
-            if(ground_truth_topic_.size() - i < 2)
+            // Skip if there are fewer than three values in the array
+            if(ground_truth_topic_.size() - i < 3)
                 break;
         }
     }
@@ -593,23 +679,51 @@ int main(int argc, char **argv)
             printf("Node %d does not have live update.\n", nodes_id[i]);
         else
         {
-            printf("Node %d is updated by the topic \"%s\".\n", nodes_id[i], ground_truth_topic[i].c_str());
-            ground_truth_sub[i] = rnsim_nh.subscribe<geometry_msgs::TransformStamped>
+            printf("Node %d is updated by the topic \"%s\" of type \"%s\".\n",
+                    nodes_id[i], ground_truth_topic[i].c_str(), ground_truth_topic_type[i].c_str());
+            if ( ground_truth_topic_type[i].compare("tf") == 0 )
+            {
+                ground_truth_sub[i] = rnsim_nh.subscribe<geometry_msgs::TransformStamped>
                                              (ground_truth_topic[i], 100,
-                                              boost::bind(&ground_truth_cb, _1, i));
-            std::string gt_topic;
-            std::stringstream ss;
-            ss << nodes_id[i];
+                                              boost::bind(&ground_truth_tf_cb, _1, i));
 
-            gt_topic = ground_truth_topic[i] + std::string("_ground_truth_") + ss.str();
-            ground_truth_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
+                std::string gt_topic;
+                std::stringstream ss;
+                ss << nodes_id[i];
 
-            gt_topic = ground_truth_topic[i] + std::string("_ground_truth_body_") + ss.str();
-            ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
+                gt_topic = ground_truth_topic[i] + std::string("_ground_truth_") + ss.str();
+                ground_truth_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
+
+                gt_topic = ground_truth_topic[i] + std::string("_ground_truth_body_") + ss.str();
+                ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
+            }
+            else if ( ground_truth_topic_type[i].compare("odom") == 0 )
+            {
+                ground_truth_sub[i] = rnsim_nh.subscribe<nav_msgs::Odometry>
+                                             (ground_truth_topic[i], 100,
+                                              boost::bind(&ground_truth_odom_cb, _1, i));
+
+                std::string gt_topic;
+                std::stringstream ss;
+                ss << nodes_id[i];
+
+                gt_topic = ground_truth_topic[i] + std::string("_ground_truth_body_") + ss.str();
+                ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);  
+            }
 
         }
     }
     cout << endl;
+
+    if(rnsim_nh.getParam("skip_old", skip_old))
+    {
+        printf("skip_old set to %s\n", skip_old? "true" : "false");
+    }
+    else
+    {
+        printf(KRED "skip_old not set! Exitting!!\n" RESET);
+        exit(-1);
+    }
 //Get params of the ground truth topics--------------------------------------------------------------
 
 
@@ -631,6 +745,7 @@ int main(int argc, char **argv)
         }
     }
 //Create the range topic for requester nodes---------------------------------------------------------
+
 
 //Create some random generators----------------------------------------------------------------------
     if(rnsim_nh.getParam("loss_chance", loss_chance))
@@ -695,7 +810,10 @@ int main(int argc, char **argv)
     // }
 
     rn_timer = rnsim_nh.createTimer(ros::Duration(slotmap_time[0]), timer_cb);
-    ros::spin();
+    
+    ros::MultiThreadedSpinner spinner(0); // Use as many threads as the system has
+    spinner.spin(); // spin() will not return until the node has been shutdown
+
 
     return 0;
 }
