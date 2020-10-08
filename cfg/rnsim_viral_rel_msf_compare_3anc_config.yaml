@@ -118,7 +118,7 @@ rnsim:
     # Name of topics for ground truth, each row specify the ID of the node
     # follow
     ground_truth_topic:
-        ["200", "/vicon/firefly_sbx/firefly_sbx"]
+        ["200", "/vicon/firefly_sbx/firefly_sbx", "tf"]
     # Ranging noise mean and std
     range_noise_gaussian: [0.00, 0.05]
     # Ranging loss rate

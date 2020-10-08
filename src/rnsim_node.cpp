@@ -740,7 +740,7 @@ int main(int argc, char **argv)
                 ss << nodes_id[rqst_idx];
                 if (range_pub[rqst_idx].getTopic().empty())
                     range_pub[rqst_idx] = rnsim_nh.advertise<uwb_driver::UwbRange>(std::string("/uwb_endorange_info_")
-                                                                            + ss.str(), 100);
+                                                                            + ss.str(), 1000);
             }
         }
     }
