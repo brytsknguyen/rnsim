@@ -12,14 +12,14 @@
 
 #include <tf/transform_broadcaster.h>
 
-#define KNRM  "\x1B[0m"
-#define KRED  "\x1B[31m"
-#define KGRN  "\x1B[32m"
-#define KYEL  "\x1B[33m"
-#define KBLU  "\x1B[34m"
-#define KMAG  "\x1B[35m"
-#define KCYN  "\x1B[36m"
-#define KWHT  "\x1B[37m"
+#define KNRM "\x1B[0m"
+#define KRED "\x1B[31m"
+#define KGRN "\x1B[32m"
+#define KYEL "\x1B[33m"
+#define KBLU "\x1B[34m"
+#define KMAG "\x1B[35m"
+#define KCYN "\x1B[36m"
+#define KWHT "\x1B[37m"
 #define RESET "\033[0m"
 
 using namespace std;
@@ -31,6 +31,8 @@ std::vector<int> nodes_id;
 // std::vector<double> nodes_idx;
 // Listing the position of the UWB nodes
 std::vector<double> nodes_pos;
+std::vector<double> nodes_pos_selfloc;
+bool selfloc_used = false;
 
 int nodes_total = 0;
 
@@ -38,13 +40,14 @@ int nodes_total = 0;
 std::vector<std::vector<double>> antennas_pos;
 
 // The transform between ground truth body and true body
-map<int, Matrix<double, 3, 3> > R_V_B;
-map<int, Matrix<double, 3, 1> > t_V_B;
-
+map<int, Matrix<double, 3, 3>> R_V_B;
+map<int, Matrix<double, 3, 1>> t_V_B;
 
 // Slot map
 std::vector<std::vector<int>> slotmap;
 std::vector<double> slotmap_time;
+
+double max_dis = 1000;
 
 bool skip_old = true;
 
@@ -80,15 +83,15 @@ int find_node_idx(int node_id)
     // else
     //     return int(std::distance(nodes_id.begin(), node_id_it));
 
-    for(int i = 0; i < nodes_id.size(); i++)
+    for (int i = 0; i < nodes_id.size(); i++)
     {
-        if(nodes_id[i] == node_id)
+        if (nodes_id[i] == node_id)
             return i;
     }
     return -1;
 }
 
-void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, int i)
+void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr &msg, int i)
 {
     // printf("Received update for node %d\n", nodes_id[i]);
     nodes_info_msg[i] = *msg;
@@ -96,7 +99,7 @@ void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, in
 
     static std::vector<geometry_msgs::PoseStamped> ground_truth_viz_msg(nodes_id.size(),
                                                                         geometry_msgs::PoseStamped());
-    
+
     ground_truth_viz_msg[i].header = nodes_info_msg[i].header;
 
     ground_truth_viz_msg[i].pose.position.x = nodes_info_msg[i].transform.translation.x;
@@ -110,7 +113,6 @@ void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, in
 
     ground_truth_pub[i].publish(ground_truth_viz_msg[i]);
 
-
     // Calculate the body frame pose
     Vector3d p_W_V(nodes_info_msg[i].transform.translation.x,
                    nodes_info_msg[i].transform.translation.y,
@@ -123,8 +125,8 @@ void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, in
 
     int node_id = nodes_id[i];
 
-    Quaterniond q_W_B     = q_W_V*Quaterniond(R_V_B[node_id]);
-    Vector3d    t_V_B_inW = q_W_V.toRotationMatrix()*t_V_B[node_id];
+    Quaterniond q_W_B = q_W_V * Quaterniond(R_V_B[node_id]);
+    Vector3d t_V_B_inW = q_W_V.toRotationMatrix() * t_V_B[node_id];
 
     Vector3d p_W_B = p_W_V + t_V_B_inW;
 
@@ -139,14 +141,14 @@ void ground_truth_tf_cb(const geometry_msgs::TransformStamped::ConstPtr& msg, in
 
     ground_truth_body_pub[i].publish(ground_truth_viz_msg[i]);
 
-    nodes_pos[i*3]     = nodes_info_msg[i].transform.translation.x;
-    nodes_pos[i*3 + 1] = nodes_info_msg[i].transform.translation.y;
-    nodes_pos[i*3 + 2] = nodes_info_msg[i].transform.translation.z;
+    nodes_pos[i * 3] = nodes_info_msg[i].transform.translation.x;
+    nodes_pos[i * 3 + 1] = nodes_info_msg[i].transform.translation.y;
+    nodes_pos[i * 3 + 2] = nodes_info_msg[i].transform.translation.z;
 
     return;
 }
 
-void ground_truth_odom_cb(const nav_msgs::Odometry::ConstPtr& msg, int i)
+void ground_truth_odom_cb(const nav_msgs::Odometry::ConstPtr &msg, int i)
 {
     // printf("Received update for node %d\n", nodes_id[i]);
     nodes_info_msg[i].header = msg->header;
@@ -177,8 +179,8 @@ void ground_truth_odom_cb(const nav_msgs::Odometry::ConstPtr& msg, int i)
 
     int node_id = nodes_id[i];
 
-    Quaterniond q_W_B     = q_W_V*Quaterniond(R_V_B[node_id]);
-    Vector3d    t_V_B_inW = q_W_V.toRotationMatrix()*t_V_B[node_id];
+    Quaterniond q_W_B = q_W_V * Quaterniond(R_V_B[node_id]);
+    Vector3d t_V_B_inW = q_W_V.toRotationMatrix() * t_V_B[node_id];
 
     Vector3d p_W_B = p_W_V + t_V_B_inW;
 
@@ -193,18 +195,18 @@ void ground_truth_odom_cb(const nav_msgs::Odometry::ConstPtr& msg, int i)
 
     ground_truth_body_pub[i].publish(ground_truth_viz_msg[i]);
 
-    nodes_pos[i*3]     = nodes_info_msg[i].transform.translation.x;
-    nodes_pos[i*3 + 1] = nodes_info_msg[i].transform.translation.y;
-    nodes_pos[i*3 + 2] = nodes_info_msg[i].transform.translation.z;
+    nodes_pos[i * 3] = nodes_info_msg[i].transform.translation.x;
+    nodes_pos[i * 3 + 1] = nodes_info_msg[i].transform.translation.y;
+    nodes_pos[i * 3 + 2] = nodes_info_msg[i].transform.translation.z;
 
     return;
 }
 
-void timer_cb(const ros::TimerEvent&)
+void timer_cb(const ros::TimerEvent &)
 {
     // Skip a few calls to avoid a quirk
     static int skips = 0;
-    if(skips < 5)
+    if (skips < 5)
     {
         skips++;
         return;
@@ -214,112 +216,110 @@ void timer_cb(const ros::TimerEvent&)
     static bool first_call = true;
     static ros::Time prev_time = ros::Time::now();
 
-    if(first_call)
+    if (first_call)
     {
         first_call = false;
         prev_time = prev_time - ros::Duration(slotmap_time[slot_idx]);
     }
 
-    double true_time  = (ros::Time::now() - prev_time).toSec();
-    double delay_time =  true_time - slotmap_time[slot_idx];
+    double true_time = (ros::Time::now() - prev_time).toSec();
+    double delay_time = true_time - slotmap_time[slot_idx];
 
     printf("Slot: %d. Prev time: %f. Curr Time: %f. True time: %.3f. Intended time: %.3f. Delay: %f\n",
-            slot_idx,
-            prev_time.toSec(),
-            ros::Time::now().toSec(),
-            true_time,
-            slotmap_time[slot_idx],
-            delay_time);
+           slot_idx,
+           prev_time.toSec(),
+           ros::Time::now().toSec(),
+           true_time,
+           slotmap_time[slot_idx],
+           delay_time);
 
     ros::Time proc_start = ros::Time::now();
-    
-    int transactions = slotmap[slot_idx].size()/4;
+
+    int transactions = slotmap[slot_idx].size() / 4;
     if (transactions != 0)
     {
         //Calculate the distance and publish
-        for(int j = 0; j < transactions; j++)
+        for (int j = 0; j < transactions; j++)
         {
-            int rqst_id = slotmap[slot_idx][j*4];
-            int rspd_id = slotmap[slot_idx][j*4 + 1];
+            int rqst_id = slotmap[slot_idx][j * 4];
+            int rspd_id = slotmap[slot_idx][j * 4 + 1];
             int rqst_idx = find_node_idx(rqst_id);
             int rspd_idx = find_node_idx(rspd_id);
-            int ant_rqst_idx = slotmap[slot_idx][j*4 + 2];
-            int ant_rspd_idx = slotmap[slot_idx][j*4 + 3];
+            int ant_rqst_idx = slotmap[slot_idx][j * 4 + 2];
+            int ant_rspd_idx = slotmap[slot_idx][j * 4 + 3];
 
-            bool rqst_pos_updated = (nodes_pos[rqst_idx*3] != 9999) &&
-                                    (nodes_pos[rqst_idx*3 + 1] != 9999) &&
-                                    (nodes_pos[rqst_idx*3 + 2] != 9999);
-            bool rspd_pos_updated = (nodes_pos[rspd_idx*3] != 9999) &&
-                                    (nodes_pos[rspd_idx*3 + 1] != 9999) &&
-                                    (nodes_pos[rspd_idx*3 + 2] != 9999);
+            bool rqst_pos_updated = (nodes_pos[rqst_idx * 3] != 9999) &&
+                                    (nodes_pos[rqst_idx * 3 + 1] != 9999) &&
+                                    (nodes_pos[rqst_idx * 3 + 2] != 9999);
+            bool rspd_pos_updated = (nodes_pos[rspd_idx * 3] != 9999) &&
+                                    (nodes_pos[rspd_idx * 3 + 1] != 9999) &&
+                                    (nodes_pos[rspd_idx * 3 + 2] != 9999);
 
-            bool node_pos_updated = rqst_pos_updated && rspd_pos_updated && (nodes_info_new[rqst_idx] || !skip_old) ;
+            bool node_pos_updated = rqst_pos_updated && rspd_pos_updated && (nodes_info_new[rqst_idx] || !skip_old);
 
-            if(node_pos_updated)
+            if (node_pos_updated)
             {
-                Vector3d rqst_pos(nodes_pos[rqst_idx*3],
-                                  nodes_pos[rqst_idx*3 + 1],
-                                  nodes_pos[rqst_idx*3 + 2]);
-                Vector3d rqst_ant_pos(antennas_pos[rqst_idx][ant_rqst_idx*3],
-                                      antennas_pos[rqst_idx][ant_rqst_idx*3 + 1],
-                                      antennas_pos[rqst_idx][ant_rqst_idx*3 + 2]);
+                Vector3d rqst_pos(nodes_pos[rqst_idx * 3],
+                                  nodes_pos[rqst_idx * 3 + 1],
+                                  nodes_pos[rqst_idx * 3 + 2]);
+                Vector3d rqst_ant_pos(antennas_pos[rqst_idx][ant_rqst_idx * 3],
+                                      antennas_pos[rqst_idx][ant_rqst_idx * 3 + 1],
+                                      antennas_pos[rqst_idx][ant_rqst_idx * 3 + 2]);
                 Eigen::Quaterniond rqst_quat(nodes_info_msg[rqst_idx].transform.rotation.w,
                                              nodes_info_msg[rqst_idx].transform.rotation.x,
                                              nodes_info_msg[rqst_idx].transform.rotation.y,
                                              nodes_info_msg[rqst_idx].transform.rotation.z);
 
-                Vector3d rspd_pos(nodes_pos[rspd_idx*3],
-                                  nodes_pos[rspd_idx*3 + 1],
-                                  nodes_pos[rspd_idx*3 + 2]);
-                Vector3d rspd_ant_pos(antennas_pos[rspd_idx][ant_rspd_idx*3],
-                                      antennas_pos[rspd_idx][ant_rspd_idx*3 + 1],
-                                      antennas_pos[rspd_idx][ant_rspd_idx*3 + 2]);
+                Vector3d rspd_pos(nodes_pos[rspd_idx * 3],
+                                  nodes_pos[rspd_idx * 3 + 1],
+                                  nodes_pos[rspd_idx * 3 + 2]);
+                Vector3d rspd_ant_pos(antennas_pos[rspd_idx][ant_rspd_idx * 3],
+                                      antennas_pos[rspd_idx][ant_rspd_idx * 3 + 1],
+                                      antennas_pos[rspd_idx][ant_rspd_idx * 3 + 2]);
                 Eigen::Quaterniond rspd_quat(nodes_info_msg[rspd_idx].transform.rotation.w,
                                              nodes_info_msg[rspd_idx].transform.rotation.x,
                                              nodes_info_msg[rspd_idx].transform.rotation.y,
                                              nodes_info_msg[rspd_idx].transform.rotation.z);
 
                 // Transform the rqst_pos and the rspd_pos from the vicon body to the true body
-                Quaterniond quat_W_B_rqst = rqst_quat*Quaterniond(R_V_B[rqst_id]);
-                Quaterniond quat_W_B_rspd = rspd_quat*Quaterniond(R_V_B[rspd_id]);
+                Quaterniond quat_W_B_rqst = rqst_quat * Quaterniond(R_V_B[rqst_id]);
+                Quaterniond quat_W_B_rspd = rspd_quat * Quaterniond(R_V_B[rspd_id]);
 
-                rqst_pos = rqst_pos + rqst_quat.toRotationMatrix()*t_V_B[rqst_id];
-                rspd_pos = rspd_pos + rspd_quat.toRotationMatrix()*t_V_B[rspd_id];
+                rqst_pos = rqst_pos + rqst_quat.toRotationMatrix() * t_V_B[rqst_id];
+                rspd_pos = rspd_pos + rspd_quat.toRotationMatrix() * t_V_B[rspd_id];
 
-
-                double distance = (rqst_pos + quat_W_B_rqst.toRotationMatrix()*rqst_ant_pos - 
-                                  (rspd_pos + quat_W_B_rspd.toRotationMatrix()*rspd_ant_pos)).norm();
+                double distance = (rqst_pos + quat_W_B_rqst.toRotationMatrix() * rqst_ant_pos -
+                                  (rspd_pos + quat_W_B_rspd.toRotationMatrix() * rspd_ant_pos)).norm();
 
                 static std::vector<uwb_driver::UwbRange> uwb_range_info_msg(nodes_id.size(),
                                                                             uwb_driver::UwbRange());
 
-                if (!range_pub[rqst_idx].getTopic().empty())
+                if (!range_pub[rqst_idx].getTopic().empty() && distance <= max_dis)
                 {
 
                     static random_device rd{};
                     static vector<std::mt19937>
-                                loss_gen(nodes_id.size(), mt19937(rd()));
+                        loss_gen(nodes_id.size(), mt19937(rd()));
                     static vector<uniform_real_distribution<>>
-                                loss_dice(nodes_id.size(),
-                                          uniform_real_distribution<>(0, 1.0));
+                        loss_dice(nodes_id.size(),
+                                  uniform_real_distribution<>(0, 1.0));
 
                     static vector<mt19937>
-                                dist_err_gen(nodes_id.size(), mt19937(rd()));
+                        dist_err_gen(nodes_id.size(), mt19937(rd()));
 
                     static vector<normal_distribution<double>>
-                                dist_err(nodes_id.size(),
-                                         normal_distribution<double>
-                                            (range_noise_gaussian[0],
-                                             range_noise_gaussian[1]));
+                        dist_err(nodes_id.size(),
+                                 normal_distribution<double>(range_noise_gaussian[0],
+                                                             range_noise_gaussian[1]));
 
                     double loss_dice_value = loss_dice[rqst_idx](loss_gen[rqst_idx]);
 
-                    if(loss_dice_value < 1.0 - loss_chance)
+                    if (loss_dice_value < 1.0 - loss_chance)
                     {
 
                         uwb_range_info_msg[rqst_idx].header = std_msgs::Header();
                         uwb_range_info_msg[rqst_idx].header.frame_id = "";
-                        uwb_range_info_msg[rqst_idx].header.stamp = nodes_info_msg[rqst_idx].header.stamp;//ros::Time::now();
+                        uwb_range_info_msg[rqst_idx].header.stamp = nodes_info_msg[rqst_idx].header.stamp; //ros::Time::now();
                         uwb_range_info_msg[rqst_idx].header.seq++;
 
                         uwb_range_info_msg[rqst_idx].requester_id = rqst_id;
@@ -336,17 +336,28 @@ void timer_cb(const ros::TimerEvent&)
                         uwb_range_info_msg[rqst_idx].distance_dot_err = 0.0;
                         uwb_range_info_msg[rqst_idx].antenna = ant_rqst_idx << 4 | ant_rspd_idx;
                         uwb_range_info_msg[rqst_idx].stopwatch_time = 123;
-                        uwb_range_info_msg[rqst_idx].uwb_time = (uint32_t)(ros::Time::now().toSec()*1000);
-                        uwb_range_info_msg[rqst_idx].responder_location.x  = rspd_pos(0);
-                        uwb_range_info_msg[rqst_idx].responder_location.y  = rspd_pos(1);
-                        uwb_range_info_msg[rqst_idx].responder_location.z  = rspd_pos(2);
+                        uwb_range_info_msg[rqst_idx].uwb_time = (uint32_t)(ros::Time::now().toSec() * 1000);
+
+                        if (selfloc_used)
+                        {
+                            uwb_range_info_msg[rqst_idx].responder_location.x = nodes_pos_selfloc[rspd_idx * 3];
+                            uwb_range_info_msg[rqst_idx].responder_location.y = nodes_pos_selfloc[rspd_idx * 3 + 1];
+                            uwb_range_info_msg[rqst_idx].responder_location.z = nodes_pos_selfloc[rspd_idx * 3 + 2];
+                        }
+                        else
+                        {
+                            uwb_range_info_msg[rqst_idx].responder_location.x = rspd_pos(0);
+                            uwb_range_info_msg[rqst_idx].responder_location.y = rspd_pos(1);
+                            uwb_range_info_msg[rqst_idx].responder_location.z = rspd_pos(2);
+                        }
+
                         uwb_range_info_msg[rqst_idx].rqst_antenna_offset.x = rqst_ant_pos(0);
                         uwb_range_info_msg[rqst_idx].rqst_antenna_offset.y = rqst_ant_pos(1);
                         uwb_range_info_msg[rqst_idx].rqst_antenna_offset.z = rqst_ant_pos(2);
 
                         range_pub[rqst_idx].publish(uwb_range_info_msg[rqst_idx]);
 
-                        if(!nodes_info_new[rqst_idx])
+                        if (!nodes_info_new[rqst_idx])
                             printf(KYEL);
 
                         printf("Range %d.%d -> %d.%d. flags: %d, %d, %s, %d.\n"
@@ -356,15 +367,15 @@ void timer_cb(const ros::TimerEvent&)
                                "paj = (%.2f, %.2f, %.2f), "
                                "dij = %f, "
                                "dij_sent = %f\n" RESET,
-                                rqst_idx, ant_rqst_idx,
-                                rspd_idx, ant_rspd_idx,
-                                rqst_pos_updated, rspd_pos_updated,
-                                nodes_info_new[rqst_idx] ? "true" : "false", rqst_idx,
-                                rqst_pos(0), rqst_pos(1), rqst_pos(2),
-                                rqst_ant_pos(0), rqst_ant_pos(1), rqst_ant_pos(2),
-                                rspd_pos(0), rspd_pos(1), rspd_pos(2),
-                                rspd_ant_pos(0), rspd_ant_pos(1), rspd_ant_pos(2),
-                                distance, uwb_range_info_msg[rqst_idx].distance);
+                               rqst_idx, ant_rqst_idx,
+                               rspd_idx, ant_rspd_idx,
+                               rqst_pos_updated, rspd_pos_updated,
+                               nodes_info_new[rqst_idx] ? "true" : "false", rqst_idx,
+                               rqst_pos(0), rqst_pos(1), rqst_pos(2),
+                               rqst_ant_pos(0), rqst_ant_pos(1), rqst_ant_pos(2),
+                               rspd_pos(0), rspd_pos(1), rspd_pos(2),
+                               rspd_ant_pos(0), rspd_ant_pos(1), rspd_ant_pos(2),
+                               distance, uwb_range_info_msg[rqst_idx].distance);
                     }
 
                     nodes_info_new[rqst_idx] = false;
@@ -374,10 +385,10 @@ void timer_cb(const ros::TimerEvent&)
             {
                 printf(KYEL "Range %d.%d -> %d.%d. flags: %d, %d, %s, %d.\n"
                             "Node position not yet updated. Skipping.",
-                            rqst_idx, slotmap[slot_idx][j*4 + 2],
-                            rspd_idx, slotmap[slot_idx][j*4 + 3],
-                            rqst_pos_updated, rspd_pos_updated,
-                            nodes_info_new[rqst_idx] ? "true" : "false", rqst_idx);
+                       rqst_idx, slotmap[slot_idx][j * 4 + 2],
+                       rspd_idx, slotmap[slot_idx][j * 4 + 3],
+                       rqst_pos_updated, rspd_pos_updated,
+                       nodes_info_new[rqst_idx] ? "true" : "false", rqst_idx);
             }
         }
     }
@@ -398,7 +409,7 @@ void timer_cb(const ros::TimerEvent&)
 
         printf("This slot proc time: %f\n", (ros::Time::now() - proc_start).toSec());
 
-        if(delay_time > slotmap_time[slot_idx] || delay_time < 0)
+        if (delay_time > slotmap_time[slot_idx] || delay_time < 0)
             delay_time = 0;
 
         prev_time = ros::Time::now() - ros::Duration(delay_time);
@@ -416,34 +427,36 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "rnsim");
     ros::NodeHandle rnsim_nh("~");
 
-//Get all the node IDs-------------------------------------------------------------------------------
-    if(rnsim_nh.getParam("nodes_id", nodes_id))
+    /* #region Get all the node IDs ---------------------------------------------------------------------------------*/
+
+    if (rnsim_nh.getParam("nodes_id", nodes_id))
     {
         nodes_total = nodes_id.size();
 
         printf("Obtained %d nodes' ID:\t", nodes_total);
-        for(int i = 0; i < nodes_total - 1; i++)
+        for (int i = 0; i < nodes_total - 1; i++)
             printf("%d\t", nodes_id[i]);
         printf("%d\n", nodes_id[nodes_total - 1]);
     }
     else
     {
-        printf( "No node ID declared. Exiting...\n" );
+        printf("No node ID declared. Exiting...\n");
         exit(-1);
     }
     cout << endl;
-//Get all the node IDs-------------------------------------------------------------------------------
 
+    /* #endregion Get all the node IDs ------------------------------------------------------------------------------*/
 
-//Get params of the node positions, and create vectors to hold corresponding object------------------
-    if(rnsim_nh.getParam("nodes_pos", nodes_pos))
+    /* #region Get params of the node positions, and create vectors to hold corresponding object --------------------*/
+
+    if (rnsim_nh.getParam("nodes_pos", nodes_pos))
     {
-        if (nodes_total == nodes_pos.size()/3)
+        if (nodes_total == nodes_pos.size() / 3)
         {
             printf("Obtained coordinates of %d nodes:\n", nodes_total);
-            for(int i = 0; i < nodes_total; i++)
+            for (int i = 0; i < nodes_total; i++)
             {
-                printf("%3.2f, %3.2f, %3.2f\n", nodes_pos[i*3], nodes_pos[i*3 + 1], nodes_pos[i*3 + 2]);
+                printf("%3.2f, %3.2f, %3.2f\n", nodes_pos[i * 3], nodes_pos[i * 3 + 1], nodes_pos[i * 3 + 2]);
                 antennas_pos.push_back(std::vector<double>{});
                 ground_truth_topic.push_back(std::string(""));
                 ground_truth_topic_type.push_back(std::string(""));
@@ -462,20 +475,51 @@ int main(int argc, char **argv)
             printf("Node position is not a triple of IDs. Exiting...\n");
             exit(-2);
         }
-    
     }
     else
     {
-        printf( "No node position declared. Exit...\n");
+        printf("No node position declared. Exit...\n");
         exit(-3);
     }
     cout << endl;
-//Get params of the node positions, and create vectors to hold corresponding object------------------
 
+    /* #endregion Get params of the node positions, and create vectors to hold corresponding object -----------------*/
 
-//Get the antenna configurations---------------------------------------------------------------------
+    /* #region Get params of the node positions for stamping the message --------------------------------------------*/
+
+    nodes_pos_selfloc = nodes_pos;
+    if (rnsim_nh.getParam("nodes_pos_selfloc", nodes_pos_selfloc))
+    {
+        if (nodes_total == nodes_pos_selfloc.size() / 3)
+        {
+            printf("Obtained coordinates of %d nodes for stamping:\n", nodes_total);
+            for (int i = 0; i < nodes_total; i++)
+            {
+                printf("%3.2f, %3.2f, %3.2f\n",
+                       nodes_pos_selfloc[i * 3],
+                       nodes_pos_selfloc[i * 3 + 1],
+                       nodes_pos_selfloc[i * 3 + 2]);
+            }
+            selfloc_used = true;
+        }
+        else
+        {
+            printf("Node position is not a triple of IDs. Exiting...\n");
+            exit(-2);
+        }
+    }
+    else
+    {
+        printf("No node position declared. Using the nodes_pos param...\n");
+    }
+    cout << endl;
+
+    /* #endregion Get params of the node positions for stamping the message -----------------------------------------*/
+
+    /* #region Get the antenna configurations------------------------------------------------------------------------*/
+
     std::vector<double> antennas_pos_;
-    if(rnsim_nh.getParam("antennas_pos", antennas_pos_))
+    if (rnsim_nh.getParam("antennas_pos", antennas_pos_))
     {
         // printf("Obtained antenna positions:\n");
         // for(int i = 0; i < antennas_pos_.size()-1; i++)
@@ -483,29 +527,28 @@ int main(int argc, char **argv)
         // printf("%f\t", antennas_pos_[antennas_pos_.size()-1]);
 
         // printf("Checking validity.\n");
-        
+
         // Check the validity of the declared anchor nodes
         int i = 0;
-        while(true)
+        while (true)
         {
             int node_id = int(antennas_pos_[i]);
             int node_idx = find_node_idx(node_id);
             if (node_idx != -1)
             {
-                int node_antennas = int(antennas_pos_[i+1]);
-                for(int j = 0; j < node_antennas; j++)
+                int node_antennas = int(antennas_pos_[i + 1]);
+                for (int j = 0; j < node_antennas; j++)
                 {
-                    auto x = antennas_pos_[i + 2 + j*3];
-                    auto y = antennas_pos_[i + 2 + j*3 + 1];
-                    auto z = antennas_pos_[i + 2 + j*3 + 2];
+                    auto x = antennas_pos_[i + 2 + j * 3];
+                    auto y = antennas_pos_[i + 2 + j * 3 + 1];
+                    auto z = antennas_pos_[i + 2 + j * 3 + 2];
                     // printf("%.2f, %.2f, %.2f\n", x, y, z);
 
                     antennas_pos[node_idx].push_back(x);
                     antennas_pos[node_idx].push_back(y);
                     antennas_pos[node_idx].push_back(z);
                 }
-                i = i + 2 + node_antennas*3 + 3;
-
+                i = i + 2 + node_antennas * 3 + 3;
             }
             else
             {
@@ -513,7 +556,7 @@ int main(int argc, char **argv)
                 i++;
             }
 
-            if(i >= antennas_pos_.size())
+            if (i >= antennas_pos_.size())
                 break;
         }
     }
@@ -523,94 +566,93 @@ int main(int argc, char **argv)
     }
 
     // Set the nodes without any declaration of antennas to zero and display everything.
-    for(int i = 0; i < nodes_total; i++)
+    for (int i = 0; i < nodes_total; i++)
     {
-        auto nodes_antennas = int(antennas_pos[i].size()/3);
-        if(nodes_antennas == 0)
+        auto nodes_antennas = int(antennas_pos[i].size() / 3);
+        if (nodes_antennas == 0)
         {
             antennas_pos[i].push_back(0);
             antennas_pos[i].push_back(0);
             antennas_pos[i].push_back(0);
             printf("Node %d with 1 antenna:\n%.2f, %.2f, %.2f\n",
-                    nodes_id[i], antennas_pos[i][0], antennas_pos[i][1], antennas_pos[i][2]);
-
+                   nodes_id[i], antennas_pos[i][0], antennas_pos[i][1], antennas_pos[i][2]);
         }
         else
         {
             printf("Node %d with %d antennas:\n", nodes_id[i], nodes_antennas);
-            for(int j = 0; j < nodes_antennas; j++)
+            for (int j = 0; j < nodes_antennas; j++)
                 printf("%.2f, %.2f, %.2f\n",
-                        antennas_pos[i][j*3],
-                        antennas_pos[i][j*3+1],
-                        antennas_pos[i][j*3+2]);
+                       antennas_pos[i][j * 3],
+                       antennas_pos[i][j * 3 + 1],
+                       antennas_pos[i][j * 3 + 2]);
         }
     }
     cout << endl;
-//Get the antenna configurations---------------------------------------------------------------------
 
+    /* #endregion Get the antenna configurations---------------------------------------------------------------------*/
 
-// Get the body transform----------------------------------------------------------------------------
-    for(int i = 0; i < nodes_total; i++)
+    /* #region Get the body transform--------------------------------------------------------------------------------*/
+
+    for (int i = 0; i < nodes_total; i++)
     {
         R_V_B.insert(make_pair(nodes_id[i], Matrix3d::Identity()));
         t_V_B.insert(make_pair(nodes_id[i], Matrix<double, 3, 1>(0, 0, 0)));
     }
     std::vector<double> T_B_V;
-    if(rnsim_nh.getParam("T_B_V", T_B_V))
+    if (rnsim_nh.getParam("T_B_V", T_B_V))
     {
         const int TF_LEN = 17;
-        int tfs = T_B_V.size()/TF_LEN;
+        int tfs = T_B_V.size() / TF_LEN;
         printf("Received transforms for %d node(s).\n", tfs); // 4x4 matrix plus one ID;
-        for(int i = 0; i < tfs; i++)
+        for (int i = 0; i < tfs; i++)
         {
-            int node_id = T_B_V[i*TF_LEN];
+            int node_id = T_B_V[i * TF_LEN];
 
-            Matrix<double, 4, 4> tf = Matrix<double, 4, 4, RowMajor>(&T_B_V[i*TF_LEN + 1]);
+            Matrix<double, 4, 4> tf = Matrix<double, 4, 4, RowMajor>(&T_B_V[i * TF_LEN + 1]);
 
             // Transform the T_B_V to T_V_B for conveniences in later calculations
-            R_V_B[ node_id ] = tf.block<3, 3>(0, 0).inverse();
+            R_V_B[node_id] = tf.block<3, 3>(0, 0).inverse();
 
-            t_V_B[ node_id ] = R_V_B[ node_id ]*(-tf.block<3, 1>(0, 3));
+            t_V_B[node_id] = R_V_B[node_id] * (-tf.block<3, 1>(0, 3));
 
             printf("Node %d, T, R and t:\n", node_id);
             cout << tf << endl;
-            cout << R_V_B[ node_id ] << endl;
-            cout << t_V_B[ node_id ] << endl;
+            cout << R_V_B[node_id] << endl;
+            cout << t_V_B[node_id] << endl;
         }
     }
     else
     {
         printf("No body transform declared. All transforms are indentity\n");
     }
-// Get the body transform----------------------------------------------------------------------------
 
+    /* #endregion Get the body transform-----------------------------------------------------------------------------*/
 
+    /* #region Get the slot map configuration------------------------------------------------------------------------*/
 
-
-//Get the slot map configuration---------------------------------------------------------------------
     std::vector<double> slotmap_;
-    if(rnsim_nh.getParam("slotmap", slotmap_))
+    if (rnsim_nh.getParam("slotmap", slotmap_))
     {
         int i = 0;
-        while(true)
+        while (true)
         {
             int slot_idx = int(slotmap_[i]);
 
-            if(slotmap.size() < slot_idx + 1)
+            if (slotmap.size() < slot_idx + 1)
             {
                 slotmap.push_back(std::vector<int>{});
-                slotmap_time.push_back(slotmap_[i+5]);
+                slotmap_time.push_back(slotmap_[i + 5]);
             }
 
-            slotmap[slot_idx].push_back(int(slotmap_[i+1]));
-            slotmap[slot_idx].push_back(int(slotmap_[i+2]));
-            slotmap[slot_idx].push_back(int(slotmap_[i+3]));
-            slotmap[slot_idx].push_back(int(slotmap_[i+4]));
+            slotmap[slot_idx].push_back(int(slotmap_[i + 1]));
+            slotmap[slot_idx].push_back(int(slotmap_[i + 2]));
+            slotmap[slot_idx].push_back(int(slotmap_[i + 3]));
+            slotmap[slot_idx].push_back(int(slotmap_[i + 4]));
 
             i = i + 6;
 
             // Skip if there are fewer than 6 values in the array
-            if(slotmap_.size() - i < 6)
+            if (slotmap_.size() - i < 6)
                 break;
         }
     }
@@ -620,39 +662,40 @@ int main(int argc, char **argv)
         exit(-4);
     }
 
-    for(int i = 0; i < slotmap.size(); i++)
+    for (int i = 0; i < slotmap.size(); i++)
     {
-        int transactions = slotmap[i].size()/4;
+        int transactions = slotmap[i].size() / 4;
         printf("Slot %d has %d transaction(s):\n", i, transactions);
         // for(int j = 0; j < slotmap[i].size(); j++)
         //     printf("%.0f ", slotmap[i][j]);
         // printf("\n");
-        for(int j = 0; j < transactions; j++)
+        for (int j = 0; j < transactions; j++)
         {
             printf("Time: %.3f, Range %d.%d -> %d.%d\n",
-                    slotmap_time[i],
-                    slotmap[i][j*4], slotmap[i][j*4 + 2],
-                    slotmap[i][j*4 + 1], slotmap[i][j*4 + 3]);
+                   slotmap_time[i],
+                   slotmap[i][j * 4], slotmap[i][j * 4 + 2],
+                   slotmap[i][j * 4 + 1], slotmap[i][j * 4 + 3]);
         }
     }
     cout << endl;
-//Get the slot map configuration---------------------------------------------------------------------
 
+    /* #endregion Get the slot map configuration---------------------------------------------------------------------*/
 
-//Get params of the ground truth topics--------------------------------------------------------------
+    /* #region Get params of the ground truth topics-----------------------------------------------------------------*/
+
     std::vector<std::string> ground_truth_topic_;
-    if(rnsim_nh.getParam("ground_truth_topic", ground_truth_topic_))
+    if (rnsim_nh.getParam("ground_truth_topic", ground_truth_topic_))
     {
         int i = 0;
-        while(true)
+        while (true)
         {
             int id = std::stod(ground_truth_topic_[i]);
             auto node_id_it = std::find(std::begin(nodes_id), std::end(nodes_id), id);
             if (node_id_it != std::end(nodes_id))
             {
                 auto node_idx = std::distance(nodes_id.begin(), node_id_it);
-                ground_truth_topic[node_idx] = ground_truth_topic_[i+1];
-                ground_truth_topic_type[node_idx] = ground_truth_topic_[i+2];
+                ground_truth_topic[node_idx] = ground_truth_topic_[i + 1];
+                ground_truth_topic_type[node_idx] = ground_truth_topic_[i + 2];
                 i = i + 3;
             }
             else
@@ -662,7 +705,7 @@ int main(int argc, char **argv)
             }
 
             // Skip if there are fewer than three values in the array
-            if(ground_truth_topic_.size() - i < 3)
+            if (ground_truth_topic_.size() - i < 3)
                 break;
         }
     }
@@ -673,19 +716,18 @@ int main(int argc, char **argv)
     }
 
     // Create the ground truth topic
-    for(int i = 0; i < ground_truth_topic.size(); i++)
+    for (int i = 0; i < ground_truth_topic.size(); i++)
     {
-        if(ground_truth_topic[i].empty())
+        if (ground_truth_topic[i].empty())
             printf("Node %d does not have live update.\n", nodes_id[i]);
         else
         {
             printf("Node %d is updated by the topic \"%s\" of type \"%s\".\n",
-                    nodes_id[i], ground_truth_topic[i].c_str(), ground_truth_topic_type[i].c_str());
-            if ( ground_truth_topic_type[i].compare("tf") == 0 )
+                   nodes_id[i], ground_truth_topic[i].c_str(), ground_truth_topic_type[i].c_str());
+            if (ground_truth_topic_type[i].compare("tf") == 0)
             {
-                ground_truth_sub[i] = rnsim_nh.subscribe<geometry_msgs::TransformStamped>
-                                             (ground_truth_topic[i], 100,
-                                              boost::bind(&ground_truth_tf_cb, _1, i));
+                ground_truth_sub[i] = rnsim_nh.subscribe<geometry_msgs::TransformStamped>(ground_truth_topic[i], 100,
+                                                                                          boost::bind(&ground_truth_tf_cb, _1, i));
 
                 std::string gt_topic;
                 std::stringstream ss;
@@ -697,61 +739,58 @@ int main(int argc, char **argv)
                 gt_topic = ground_truth_topic[i] + std::string("_ground_truth_body_") + ss.str();
                 ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
             }
-            else if ( ground_truth_topic_type[i].compare("odom") == 0 )
+            else if (ground_truth_topic_type[i].compare("odom") == 0)
             {
-                ground_truth_sub[i] = rnsim_nh.subscribe<nav_msgs::Odometry>
-                                             (ground_truth_topic[i], 100,
-                                              boost::bind(&ground_truth_odom_cb, _1, i));
+                ground_truth_sub[i] = rnsim_nh.subscribe<nav_msgs::Odometry>(ground_truth_topic[i], 100,
+                                                                             boost::bind(&ground_truth_odom_cb, _1, i));
 
                 std::string gt_topic;
                 std::stringstream ss;
                 ss << nodes_id[i];
 
                 gt_topic = ground_truth_topic[i] + std::string("_ground_truth_body_") + ss.str();
-                ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);  
+                ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
             }
-
         }
     }
     cout << endl;
 
-    if(rnsim_nh.getParam("skip_old", skip_old))
+    if (rnsim_nh.getParam("skip_old", skip_old))
     {
-        printf("skip_old set to %s\n", skip_old? "true" : "false");
+        printf("skip_old set to %s\n", skip_old ? "true" : "false");
     }
     else
     {
         printf(KRED "skip_old not set! Exitting!!\n" RESET);
         exit(-1);
     }
-//Get params of the ground truth topics--------------------------------------------------------------
 
+    /* #endregion Get params of the ground truth topics----------------------------------------------------------------*/
 
-//Create the range topic for requester nodes---------------------------------------------------------
-    for(int i = 0; i < slotmap.size(); i++)
+    /* #region Create the range topic for requester nodes------------------------------------------------------------*/
+    for (int i = 0; i < slotmap.size(); i++)
     {
-        int transactions = slotmap[i].size()/4;
+        int transactions = slotmap[i].size() / 4;
         if (transactions != 0)
         {
-            for(int j = 0; j < transactions; j++)
+            for (int j = 0; j < transactions; j++)
             {
-                int rqst_idx = find_node_idx(slotmap[i][j*4]);
+                int rqst_idx = find_node_idx(slotmap[i][j * 4]);
                 std::stringstream ss;
                 ss << nodes_id[rqst_idx];
                 if (range_pub[rqst_idx].getTopic().empty())
-                    range_pub[rqst_idx] = rnsim_nh.advertise<uwb_driver::UwbRange>(std::string("/uwb_endorange_info_")
-                                                                            + ss.str(), 1000);
+                    range_pub[rqst_idx] = rnsim_nh.advertise<uwb_driver::UwbRange>(std::string("/uwb_endorange_info_") + ss.str(), 1000);
             }
         }
     }
-//Create the range topic for requester nodes---------------------------------------------------------
+    /* #endregion Create the range topic for requester nodes---------------------------------------------------------*/
 
+    /* #region Create some random generators-------------------------------------------------------------------------*/
 
-//Create some random generators----------------------------------------------------------------------
-    if(rnsim_nh.getParam("loss_chance", loss_chance))
+    if (rnsim_nh.getParam("loss_chance", loss_chance))
     {
         if (0.0 <= loss_chance && loss_chance < 1.0)
-            printf("Ranging loss rate: %d", int(loss_chance*100));
+            printf("Ranging loss rate: %d", int(loss_chance * 100));
         else
         {
             printf("Ranging loss rate not well-defined. Exitting\n");
@@ -764,56 +803,68 @@ int main(int argc, char **argv)
         exit(-7);
     }
 
-    if(rnsim_nh.getParam("range_noise_gaussian", range_noise_gaussian))
+    if (rnsim_nh.getParam("range_noise_gaussian", range_noise_gaussian))
     {
         printf("Ranging noise declared, mean %f, std: %f.\n",
-                range_noise_gaussian[0],
-                range_noise_gaussian[1]);
+               range_noise_gaussian[0],
+               range_noise_gaussian[1]);
     }
     else
     {
         printf("Ranging noise not declared. Exitting.\n");
         exit(-9);
     }
-//Create some random generators----------------------------------------------------------------------
+
+
+    if (rnsim_nh.getParam("max_dis", max_dis))
+    {
+        printf("max_dis declared: %f.\n", max_dis);
+    }
+    else
+    {
+        printf("max_dis not declared. Exitting.\n");
+        exit(-9);
+    }
     
+    
+    /* #endregion Create some random generators----------------------------------------------------------------------*/
+
     // while(ros::ok())
     // {
-        // ros::spinOnce();
+    // ros::spinOnce();
 
-        // static int slot_idx = 0;
-        // static ros::Time prev_time = ros::Time::now();
+    // static int slot_idx = 0;
+    // static ros::Time prev_time = ros::Time::now();
 
-        // printf("Slot: %d. Slot true time: %.3f. Intended time: %.3f\n",
-        //         slot_idx, (ros::Time::now() - prev_time).toSec(),
-        //         slotmap_time[slot_idx]);
-        // prev_time = ros::Time::now();
-        
-        // int transactions = slotmap[slot_idx].size()/4;
-        // if (transactions != 0)
-        // {
-        //     //Calculate the distance and publish
-        //     for(int j = 0; j < transactions; j++)
-        //     {
-        //         printf("Range %d.%d -> %d.%d\n",
-        //                 slotmap[slot_idx][j*4], slotmap[slot_idx][j*4 + 2],
-        //                 slotmap[slot_idx][j*4 + 1], slotmap[slot_idx][j*4 + 3]);        
-        //     }
-        // }
+    // printf("Slot: %d. Slot true time: %.3f. Intended time: %.3f\n",
+    //         slot_idx, (ros::Time::now() - prev_time).toSec(),
+    //         slotmap_time[slot_idx]);
+    // prev_time = ros::Time::now();
 
-        // // Increment the slot ID
-        // slot_idx++;
-        // if (slot_idx == slotmap_time.size())
-        //     slot_idx = 0;
+    // int transactions = slotmap[slot_idx].size()/4;
+    // if (transactions != 0)
+    // {
+    //     //Calculate the distance and publish
+    //     for(int j = 0; j < transactions; j++)
+    //     {
+    //         printf("Range %d.%d -> %d.%d\n",
+    //                 slotmap[slot_idx][j*4], slotmap[slot_idx][j*4 + 2],
+    //                 slotmap[slot_idx][j*4 + 1], slotmap[slot_idx][j*4 + 3]);
+    //     }
+    // }
 
-        // ros::Duration(slotmap_time[slot_idx]).sleep();
+    // // Increment the slot ID
+    // slot_idx++;
+    // if (slot_idx == slotmap_time.size())
+    //     slot_idx = 0;
+
+    // ros::Duration(slotmap_time[slot_idx]).sleep();
     // }
 
     rn_timer = rnsim_nh.createTimer(ros::Duration(slotmap_time[0]), timer_cb);
-    
-    ros::MultiThreadedSpinner spinner(0); // Use as many threads as the system has
-    spinner.spin(); // spin() will not return until the node has been shutdown
 
+    ros::MultiThreadedSpinner spinner(0); // Use as many threads as the system has
+    spinner.spin();                       // spin() will not return until the node has been shutdown
 
     return 0;
 }
