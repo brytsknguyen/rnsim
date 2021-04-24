@@ -10,18 +10,18 @@ nodes_id:
 # startup. If the node's coordinate is undetermined on startup, put 9999
 # into it.
 nodes_pos:
-    [ 0,    0,  1.0,
-      10,   0,  1.25,
-      5,   -5,  1.5,
+    [ 2.5,  7.5,  1.0,
+      2.5, -7.5,  1.25,
+     -2.5,  0,    1.5,
       9999, 9999, 9999]
 
 # 3D positions pf the nodes to publish if we want to pretend they are
 # autocalibrated
 nodes_pos_selfloc:
-    [ 0,      0,    1.0,
-      10.05,  0,    1.0,
-      4.95,  -5.1,  1.0,
-      9999,   9999, 9999]  
+    [ 0,      0,     1.0,
+      15.02,  0,     1.0,
+      7.45,  -5.07,  1.0,
+      9999,   9999,  9999]  
 
 # 3D coordinates of the anchors in each node's body frame. Each row starts
 # with the node's ID, then the number of antennas, then the triplets of
@@ -99,9 +99,9 @@ ground_truth_topic:
 # Skip the slot if the data is old
 skip_old: false
 # Ranging noise mean and std
-range_noise_gaussian: [0.00, 0.05]
+range_noise_gaussian: [0.05, 0.05]
 # Ranging loss rate
-loss_chance: 0.00
+loss_chance: 0.05
 
 # Max distance to publish
 max_dis: 30
