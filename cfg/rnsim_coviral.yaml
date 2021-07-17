@@ -1,0 +1,62 @@
+# ID numbers of the UWB nodes, we are using a convention where the list is
+# supposed to be plit into two rows, first row lists the supposedly static
+# nodes (anchors), and second row is for moving nodes
+nodes_id:
+    [ 200, 201, 202 ]
+# 3D position of the nodes in the supposed World coordinates systems, each
+# row should have three coordinates (x, y, z) of the corresponding node on
+# startup. If the node's coordinate is undetermined on startup, put 9999
+# into it.
+nodes_pos:
+    [ 9999, 9999, 9999,
+      9999, 9999, 9999,
+      9999, 9999, 9999 ]
+
+# 3D coordinates of the anchors in each node's body frame. Each row starts
+# with the node's ID, then the number of antennas, then the triplets of
+# anchor coordinates. Nodes that don't have anything declared for them are
+# assumed to have a single antenna at its origin
+antennas_pos:
+    [ 200, 1, 0.0, 0.0, 0.0,
+      201, 1, 0.0, 0.0, 0.0,
+      202, 1, 0.0, 0.0, 0.0 ]
+# Transform from the vicon frame to the body frame
+T_B_V:
+    [ 200, 1.0,  0.0,  0.0,  0.0,
+           0.0,  1.0,  0.0,  0.0,
+           0.0,  0.0,  1.0,  0.0,
+           0.0,  0.0,  0.0,  1.0,
+      201, 1.0,  0.0,  0.0,  0.0,
+           0.0,  1.0,  0.0,  0.0,
+           0.0,  0.0,  1.0,  0.0,
+           0.0,  0.0,  0.0,  1.0,
+      202, 1.0,  0.0,  0.0,  0.0,
+           0.0,  1.0,  0.0,  0.0,
+           0.0,  0.0,  1.0,  0.0,
+           0.0,  0.0,  0.0,  1.0 ]
+# Slot map, each row starts with the slot ID, followed by requestor ID,
+# responder ID, requester antenna ID, responder antenna ID, and time period.
+# If two transactions occur at the same time, the time period of the firstly
+# declared transaction is the time period of the slot.
+
+slotmap:
+    [ 0,  200, 201, 0, 0, 0.1,
+      1,  201, 202, 0, 0, 0.1,
+      2,  202, 200, 0, 0, 0.1 ]
+
+# Name of topics for ground truth, each row specify the ID of the node
+# followed by the topic name, follwed by either "tf" or "pose" to indicate the topic type
+ground_truth_topic:
+    [ "200", "/drone0/leica/pose/absolute", "pose",
+      "201", "/drone1/leica/pose/absolute", "pose",
+      "202", "/drone2/leica/pose/absolute", "pose" ]
+
+# Skip the slot if the data is old
+skip_old: false
+# Ranging noise mean and std
+range_noise_gaussian: [0.00, 0.05]
+# Ranging loss rate
+loss_chance: 0.00
+# Max distance to publish
+max_dis: 200
+

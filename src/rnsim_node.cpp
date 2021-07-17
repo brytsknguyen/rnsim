@@ -202,6 +202,62 @@ void ground_truth_odom_cb(const nav_msgs::Odometry::ConstPtr &msg, int i)
     return;
 }
 
+void ground_truth_pose_cb(const geometry_msgs::PoseStamped::ConstPtr &msg, int i)
+{
+    // printf("Received update for node %d\n", nodes_id[i]);
+
+    nodes_info_msg[i].header = msg->header;
+    // Copy data to the message
+    nodes_info_msg[i].transform.translation.x = msg->pose.position.x;
+    nodes_info_msg[i].transform.translation.y = msg->pose.position.y;
+    nodes_info_msg[i].transform.translation.z = msg->pose.position.z;
+    nodes_info_msg[i].transform.rotation.x = msg->pose.orientation.x;
+    nodes_info_msg[i].transform.rotation.y = msg->pose.orientation.y;
+    nodes_info_msg[i].transform.rotation.z = msg->pose.orientation.z;
+    nodes_info_msg[i].transform.rotation.w = msg->pose.orientation.w;
+
+    nodes_info_new[i] = true;
+
+    // Store and publish the body frame pose
+    static std::vector<geometry_msgs::PoseStamped> ground_truth_viz_msg(nodes_id.size(),
+                                                                        geometry_msgs::PoseStamped());
+
+    // Calculate the body frame pose (no need to publish the posestamp data since the topic is already in posestamped format)
+    Vector3d p_W_V(nodes_info_msg[i].transform.translation.x,
+                   nodes_info_msg[i].transform.translation.y,
+                   nodes_info_msg[i].transform.translation.z);
+
+    Quaterniond q_W_V(nodes_info_msg[i].transform.rotation.w,
+                      nodes_info_msg[i].transform.rotation.x,
+                      nodes_info_msg[i].transform.rotation.y,
+                      nodes_info_msg[i].transform.rotation.z);
+
+    int node_id = nodes_id[i];
+
+    Quaterniond q_W_B = q_W_V * Quaterniond(R_V_B[node_id]);
+    Vector3d t_V_B_inW = q_W_V.toRotationMatrix() * t_V_B[node_id];
+
+    Vector3d p_W_B = p_W_V + t_V_B_inW;
+
+    ground_truth_viz_msg[i].pose.position.x = p_W_B.x();
+    ground_truth_viz_msg[i].pose.position.y = p_W_B.y();
+    ground_truth_viz_msg[i].pose.position.z = p_W_B.z();
+
+    ground_truth_viz_msg[i].pose.orientation.x = q_W_B.x();
+    ground_truth_viz_msg[i].pose.orientation.y = q_W_B.y();
+    ground_truth_viz_msg[i].pose.orientation.z = q_W_B.z();
+    ground_truth_viz_msg[i].pose.orientation.w = q_W_B.w();
+
+    ground_truth_body_pub[i].publish(ground_truth_viz_msg[i]);
+
+    nodes_pos[i * 3] = nodes_info_msg[i].transform.translation.x;
+    nodes_pos[i * 3 + 1] = nodes_info_msg[i].transform.translation.y;
+    nodes_pos[i * 3 + 2] = nodes_info_msg[i].transform.translation.z;
+
+    return;
+}
+
+
 void timer_cb(const ros::TimerEvent &)
 {
     // Skip a few calls to avoid a quirk
@@ -743,6 +799,18 @@ int main(int argc, char **argv)
             {
                 ground_truth_sub[i] = rnsim_nh.subscribe<nav_msgs::Odometry>(ground_truth_topic[i], 100,
                                                                              boost::bind(&ground_truth_odom_cb, _1, i));
+
+                std::string gt_topic;
+                std::stringstream ss;
+                ss << nodes_id[i];
+
+                gt_topic = ground_truth_topic[i] + std::string("_ground_truth_body_") + ss.str();
+                ground_truth_body_pub[i] = rnsim_nh.advertise<geometry_msgs::PoseStamped>(gt_topic, 100);
+            }
+            else if (ground_truth_topic_type[i].compare("pose") == 0)
+            {
+                ground_truth_sub[i] = rnsim_nh.subscribe<geometry_msgs::PoseStamped>(ground_truth_topic[i], 100,
+                                                                             boost::bind(&ground_truth_pose_cb, _1, i));
 
                 std::string gt_topic;
                 std::stringstream ss;
